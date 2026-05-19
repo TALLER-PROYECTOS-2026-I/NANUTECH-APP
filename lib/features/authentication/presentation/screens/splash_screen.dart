@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 
-import '../services/session_service.dart';
+import '../../services/session_service.dart';
 import 'login_screen.dart';
-import '../../driver/screens/driver_dashboard_screen.dart';
+import '../../../driver_shift/presentation/screens/driver_dashboard_screen.dart';
 
+/// Pantalla inicial de la app.
+///
+/// Decide si:
+/// - El usuario debe iniciar sesión.
+/// - Existe una sesión local vigente.
+/// - La sesión expiró por 2 horas de inactividad.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -19,7 +25,8 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> checkSession() async {
-    final session = await SessionService().getSession();
+    final sessionService = SessionService();
+    final session = await sessionService.getSession();
 
     if (!mounted) return;
 
@@ -34,6 +41,26 @@ class _SplashScreenState extends State<SplashScreen> {
       );
       return;
     }
+
+    final expired = await sessionService.isSessionExpired();
+
+    if (expired) {
+      await sessionService.logout();
+
+      if (!mounted) return;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const LoginScreen(),
+        ),
+      );
+      return;
+    }
+
+    await sessionService.updateLastActivity();
+
+    if (!mounted) return;
 
     Navigator.pushReplacement(
       context,

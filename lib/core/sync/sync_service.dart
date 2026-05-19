@@ -1,7 +1,5 @@
 import 'dart:convert';
 
-import 'package:sqflite/sqflite.dart';
-
 import '../database/database_service.dart';
 
 class SyncService {

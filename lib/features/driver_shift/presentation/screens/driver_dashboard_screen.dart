@@ -7,13 +7,13 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 
-import '../../../core/config/api_config.dart';
-import '../../../core/database/database_service.dart';
-import '../../../core/sync/sync_service.dart';
-import '../models/jornada_model.dart';
-import '../services/jornada_api_service.dart';
-import '../../auth/screens/login_screen.dart';
-import '../../auth/services/session_service.dart';
+import '../../../../core/config/api_config.dart';
+import '../../../../core/database/database_service.dart';
+import '../../../../core/sync/sync_service.dart';
+import '../../domain/jornada_model.dart';
+import '../../services/jornada_api_service.dart';
+import '../../../authentication/presentation/screens/login_screen.dart';
+import '../../../authentication/services/session_service.dart';
 
 class DriverDashboardScreen extends StatefulWidget {
   final String conductorId;
@@ -34,6 +34,7 @@ class DriverDashboardScreen extends StatefulWidget {
 class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   final syncService = SyncService();
   final jornadaApi = JornadaApiService();
+  final sessionService = SessionService();
 
   StreamSubscription? connectivitySubscription;
   Timer? timer;
@@ -103,6 +104,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       }
 
       await loadCounters();
+      await sessionService.updateLastActivity();
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -225,6 +227,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       }
 
       await loadCounters();
+      await sessionService.updateLastActivity();
     } catch (_) {
       final local = await getJornadaCache();
 
@@ -311,6 +314,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
         );
 
         await saveJornadaCache(updated);
+        await sessionService.updateLastActivity();
 
         setState(() {
           jornada = updated;
@@ -361,6 +365,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     );
 
     await saveJornadaCache(localUpdated);
+    await sessionService.updateLastActivity();
 
     setState(() {
       jornada = localUpdated;
@@ -389,6 +394,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
         );
 
         await saveJornadaCache(updated);
+        await sessionService.updateLastActivity();
 
         setState(() {
           jornada = updated;
@@ -463,6 +469,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     );
 
     await saveJornadaCache(localUpdated);
+    await sessionService.updateLastActivity();
 
     setState(() {
       jornada = localUpdated;
@@ -572,38 +579,38 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   }
 
   Future<void> logout() async {
-  final confirm = await showDialog<bool>(
-    context: context,
-    builder: (_) => AlertDialog(
-      title: const Text('Cerrar sesión'),
-      content: const Text('¿Deseas cerrar tu sesión?'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancelar'),
-        ),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('Cerrar sesión'),
-        ),
-      ],
-    ),
-  );
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Cerrar sesión'),
+        content: const Text('¿Deseas cerrar tu sesión?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Cerrar sesión'),
+          ),
+        ],
+      ),
+    );
 
-  if (confirm != true) return;
+    if (confirm != true) return;
 
-  await SessionService().logout();
+    await sessionService.logout();
 
-  if (!mounted) return;
+    if (!mounted) return;
 
-  Navigator.pushAndRemoveUntil(
-    context,
-    MaterialPageRoute(
-      builder: (_) => const LoginScreen(),
-    ),
-    (_) => false,
-  );
-}
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const LoginScreen(),
+      ),
+      (_) => false,
+    );
+  }
 
   void showMessage(String message, {bool success = false}) {
     if (!mounted) return;
@@ -669,6 +676,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                         else
                           _JourneyCard(
                             jornada: current,
+                            driverName: widget.nombres,
                             elapsed: elapsed,
                             formatDuration: formatDuration,
                             formatDate: formatDate,
@@ -923,6 +931,7 @@ class _NoJourneyCard extends StatelessWidget {
 
 class _JourneyCard extends StatelessWidget {
   final JornadaModel jornada;
+  final String driverName;
   final Duration elapsed;
   final String Function(Duration duration) formatDuration;
   final String Function(String? value) formatDate;
@@ -932,6 +941,7 @@ class _JourneyCard extends StatelessWidget {
 
   const _JourneyCard({
     required this.jornada,
+    required this.driverName,
     required this.elapsed,
     required this.formatDuration,
     required this.formatDate,
@@ -975,7 +985,7 @@ class _JourneyCard extends StatelessWidget {
           _InfoLine(
             icon: Icons.badge,
             label: 'Conductor',
-            value: jornada.conductorId,
+            value: driverName,
           ),
           _InfoLine(
             icon: Icons.local_shipping,

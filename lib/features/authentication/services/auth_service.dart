@@ -1,8 +1,7 @@
 import 'package:dio/dio.dart';
 
-import '../../../core/network/api_client.dart';
-import '../models/user_model.dart';
-
+import '../../../../core/network/api_client.dart';
+import '../domain/user_model.dart';
 class AuthService {
   Future<UserModel> login(
     String email,

@@ -1,6 +1,12 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
+/// Servicio centralizado de SQLite para la app móvil.
+///
+/// Responsabilidades:
+/// - Crear la base de datos local.
+/// - Crear tablas para sesión, jornada cacheada, eventos offline y logs.
+/// - Aplicar migraciones simples cuando ya existe una BD previa.
 class DatabaseService {
   static Database? _database;
 
@@ -19,7 +25,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -43,9 +49,16 @@ class DatabaseService {
         apellidos TEXT,
         role TEXT,
         token TEXT,
-        created_at TEXT
+        created_at TEXT,
+        last_activity_at TEXT
       )
     ''');
+
+    try {
+      await db.execute(
+        'ALTER TABLE session_local ADD COLUMN last_activity_at TEXT',
+      );
+    } catch (_) {}
 
     await db.execute('''
       CREATE TABLE IF NOT EXISTS jornada_cache (

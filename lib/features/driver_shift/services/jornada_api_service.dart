@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 import '../../../core/network/api_client.dart';
-import '../models/jornada_model.dart';
+import '../domain/jornada_model.dart';
 
 class JornadaApiService {
   Future<JornadaModel?> getJornadaActual({

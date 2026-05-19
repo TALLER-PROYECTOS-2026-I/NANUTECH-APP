@@ -4,8 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-import 'features/auth/screens/login_screen.dart';
-import 'features/auth/screens/splash_screen.dart';
+import 'features/authentication/presentation/screens/splash_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
