@@ -6,14 +6,22 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../../core/config/api_config.dart';
 import '../../../../core/database/database_service.dart';
 import '../../../../core/sync/sync_service.dart';
+
 import '../../domain/jornada_model.dart';
 import '../../services/jornada_api_service.dart';
+
 import '../../../authentication/presentation/screens/login_screen.dart';
 import '../../../authentication/services/session_service.dart';
+
+import '../../../emergency_alerts/services/emergency_alert_api_service.dart';
+import '../../../emergency_alerts/services/location_service.dart';
+import '../../../emergency_alerts/presentation/widgets/sos_panic_button.dart';
+import '../../../emergency_alerts/presentation/widgets/mechanical_assistance_modal.dart';
 
 class DriverDashboardScreen extends StatefulWidget {
   final String conductorId;
@@ -36,12 +44,25 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   final jornadaApi = JornadaApiService();
   final sessionService = SessionService();
 
+  /// Servicio encargado de consumir los endpoints HU21:
+  /// POST /alertas/sos y POST /alertas/auxilio.
+  final emergencyApi = EmergencyAlertApiService();
+
+  /// Servicio encargado de obtener latitud y longitud reales
+  /// desde el GPS del dispositivo.
+  final locationService = LocationService();
+
   StreamSubscription? connectivitySubscription;
   Timer? timer;
+  Timer? sosPollingTimer;
 
   bool isOnline = false;
   bool loading = true;
   bool syncing = false;
+
+  /// Cuando se dispara SOS, la app queda bloqueada visualmente
+  /// hasta que un administrador levante la alerta desde el panel.
+  bool sosLocked = false;
 
   JornadaModel? jornada;
   Duration elapsed = Duration.zero;
@@ -378,6 +399,11 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   Future<void> finalizarTurno() async {
     if (jornada == null) return;
 
+    if (sosLocked) {
+      showMessage('Sistema bloqueado por alerta SOS.');
+      return;
+    }
+
     final observaciones = await askObservaciones();
 
     if (observaciones == null) return;
@@ -420,8 +446,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
 
     await finalizarTurnoOffline(observaciones);
   }
-
-  Duration getTotalDuration(JornadaModel current) {
+    Duration getTotalDuration(JornadaModel current) {
     if (current.duracionTotalSegundos != null) {
       return Duration(seconds: current.duracionTotalSegundos!);
     }
@@ -484,6 +509,177 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     );
   }
 
+  /// HU21 - Envía alerta SOS con ubicación real del dispositivo.
+  ///
+  /// Flujo:
+  /// 1. Valida que exista una jornada EN_PROCESO.
+  /// 2. Solicita GPS real con LocationService.
+  /// 3. Si hay internet, envía POST /alertas/sos.
+  /// 4. Si no hay internet, guarda evento SOS_ALERT en SQLite.
+  /// 5. Bloquea visualmente la app por seguridad.
+  Future<void> sendSosAlert() async {
+    if (jornada == null || jornada!.estado != 'EN_PROCESO') {
+      showMessage('Solo puedes enviar SOS con una jornada en proceso.');
+      return;
+    }
+
+    try {
+      final position = await locationService.getCurrentPosition();
+      final eventId = 'SOS-${DateTime.now().millisecondsSinceEpoch}';
+      final connected = await hasRealInternet();
+
+      if (connected) {
+        await emergencyApi.sendSos(
+          token: widget.token,
+          jornadaId: jornada!.id,
+          conductorId: widget.conductorId,
+          latitud: position.latitude,
+          longitud: position.longitude,
+          eventIdCliente: eventId,
+        );
+      } else {
+        await syncService.saveOfflineEvent(
+          eventType: 'SOS_ALERT',
+          priority: 0,
+          payload: {
+            'jornada_id': jornada!.id,
+            'conductor_id': widget.conductorId,
+            'latitud': position.latitude,
+            'longitud': position.longitude,
+            'timestamp_local': DateTime.now().toIso8601String(),
+            'created_offline': true,
+            'event_id_cliente': eventId,
+          },
+        );
+      }
+
+      await sessionService.updateLastActivity();
+
+      if (!mounted) return;
+
+      setState(() {
+        sosLocked = true;
+      });
+
+      startSosPolling();
+
+    } catch (e) {
+      showMessage(
+        e.toString().replaceAll('Exception: ', ''),
+      );
+    }
+  }
+
+  void startSosPolling() {
+  sosPollingTimer?.cancel();
+
+  sosPollingTimer = Timer.periodic(
+    const Duration(seconds: 10),
+    (_) => checkSosResolved(),
+  );
+}
+
+Future<void> checkSosResolved() async {
+  if (!sosLocked || jornada == null) return;
+
+  try {
+    final hasSos = await emergencyApi.hasActiveSos(
+      token: widget.token,
+      jornadaId: jornada!.id,
+    );
+
+    if (!hasSos && mounted) {
+      sosPollingTimer?.cancel();
+
+      setState(() {
+        sosLocked = false;
+      });
+
+      showMessage(
+        'Alerta SOS resuelta. Sistema desbloqueado.',
+        success: true,
+      );
+    }
+  } catch (_) {
+    // Si falla la consulta, la app mantiene el bloqueo por seguridad.
+  }
+}
+
+  /// HU21 - Abre modal de Auxilio Mecánico y envía solicitud.
+  ///
+  /// Flujo:
+  /// 1. Valida jornada EN_PROCESO.
+  /// 2. Muestra modal con información, avisos, contacto y selector.
+  /// 3. Obtiene GPS real del dispositivo.
+  /// 4. Si hay internet, envía POST /alertas/auxilio.
+  /// 5. Si no hay internet, guarda MECHANICAL_ASSISTANCE con prioridad.
+  Future<void> openMechanicalAssistance() async {
+    if (jornada == null || jornada!.estado != 'EN_PROCESO') {
+      showMessage('Solo puedes solicitar auxilio con una jornada en proceso.');
+      return;
+    }
+
+    final result = await showModalBottomSheet<MechanicalAssistanceResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const MechanicalAssistanceModal(),
+    );
+
+    if (result == null) return;
+
+    try {
+      final position = await locationService.getCurrentPosition();
+      final eventId = 'AUX-${DateTime.now().millisecondsSinceEpoch}';
+      final connected = await hasRealInternet();
+
+      if (connected) {
+        await emergencyApi.sendMechanicalAssistance(
+          token: widget.token,
+          jornadaId: jornada!.id,
+          conductorId: widget.conductorId,
+          tipoFalla: result.tipoFalla,
+          detalle: result.detalle,
+          latitud: position.latitude,
+          longitud: position.longitude,
+          eventIdCliente: eventId,
+        );
+      } else {
+        await syncService.saveOfflineEvent(
+          eventType: 'MECHANICAL_ASSISTANCE',
+          priority: 1,
+          payload: {
+            'jornada_id': jornada!.id,
+            'conductor_id': widget.conductorId,
+            'tipo_falla_mecanica': result.tipoFalla,
+            'detalle': result.detalle,
+            'latitud': position.latitude,
+            'longitud': position.longitude,
+            'timestamp_local': DateTime.now().toIso8601String(),
+            'created_offline': true,
+            'event_id_cliente': eventId,
+          },
+        );
+      }
+
+      await sessionService.updateLastActivity();
+
+      showMessage(
+        'Auxilio Mecánico Solicitado. Tu solicitud ha sido enviada.',
+        success: true,
+      );
+    } catch (e) {
+      showMessage(
+        e.toString().replaceAll('Exception: ', ''),
+      );
+    }
+  }
+
+  /// Sincroniza eventos offline.
+  ///
+  /// HU21 exige prioridad absoluta para SOS si se generó sin conexión.
+  /// Por eso primero se procesan SOS_ALERT, luego Auxilio, y al final
+  /// eventos normales de jornada.
   Future<void> syncPendingEvents() async {
     if (syncing) return;
 
@@ -506,9 +702,51 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
 
     final events = await syncService.getPendingEvents();
 
-    for (final event in events) {
+    final sortedEvents = [...events]..sort((a, b) {
+        int priority(String type) {
+          if (type == 'SOS_ALERT') return 0;
+          if (type == 'MECHANICAL_ASSISTANCE') return 1;
+          return 2;
+        }
+
+        return priority(a['event_type']).compareTo(
+          priority(b['event_type']),
+        );
+      });
+
+    for (final event in sortedEvents) {
       try {
         final payload = jsonDecode(event['payload']);
+
+        if (event['event_type'] == 'SOS_ALERT') {
+          await emergencyApi.sendSos(
+            token: widget.token,
+            jornadaId: payload['jornada_id'],
+            conductorId: payload['conductor_id'],
+            latitud: payload['latitud'],
+            longitud: payload['longitud'],
+            eventIdCliente: payload['event_id_cliente'],
+          );
+
+          if (mounted) {
+            setState(() {
+              sosLocked = true;
+            });
+          }
+        }
+
+        if (event['event_type'] == 'MECHANICAL_ASSISTANCE') {
+          await emergencyApi.sendMechanicalAssistance(
+            token: widget.token,
+            jornadaId: payload['jornada_id'],
+            conductorId: payload['conductor_id'],
+            tipoFalla: payload['tipo_falla_mecanica'],
+            detalle: payload['detalle'] ?? '',
+            latitud: payload['latitud'],
+            longitud: payload['longitud'],
+            eventIdCliente: payload['event_id_cliente'],
+          );
+        }
 
         if (event['event_type'] == 'START_JORNADA') {
           await jornadaApi.iniciarJornada(
@@ -636,12 +874,17 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   void dispose() {
     connectivitySubscription?.cancel();
     timer?.cancel();
+    sosPollingTimer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final current = jornada;
+
+    if (sosLocked) {
+      return const _SosLockedScreen();
+    }
 
     return Scaffold(
       backgroundColor: const Color(0xfff4f7fb),
@@ -685,6 +928,13 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
                             onFinish: finalizarTurno,
                           ),
                         const SizedBox(height: 18),
+                        if (current != null && current.estado == 'EN_PROCESO')
+                          _EmergencyActionsCard(
+                            onSosCompleted: sendSosAlert,
+                            onMechanicalAssistance:
+                                openMechanicalAssistance,
+                          ),
+                        const SizedBox(height: 18),
                         const _RulesCard(),
                       ],
                     ),
@@ -695,6 +945,95 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     );
   }
 }
+
+class _SosLockedScreen extends StatelessWidget {
+  const _SosLockedScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: Color(0xff7f1d1d),
+      body: Center(
+        child: Padding(
+          padding: EdgeInsets.all(28),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.lock,
+                color: Colors.white,
+                size: 86,
+              ),
+              SizedBox(height: 24),
+              Text(
+                '¡ALERTA SOS!',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 34,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              SizedBox(height: 16),
+              Text(
+                'Ubicación enviada al administrador. Sistema bloqueado por seguridad.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 19,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EmergencyActionsCard extends StatelessWidget {
+  final Future<void> Function() onSosCompleted;
+  final VoidCallback onMechanicalAssistance;
+
+  const _EmergencyActionsCard({
+    required this.onSosCompleted,
+    required this.onMechanicalAssistance,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        SosPanicButton(
+          enabled: true,
+          onCompleted: onSosCompleted,
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: onMechanicalAssistance,
+            icon: const Icon(Icons.build_circle),
+            label: const Text('Auxilio Mecánico'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xffea580c),
+              side: const BorderSide(
+                color: Color(0xffea580c),
+                width: 1.4,
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 15),
+              textStyle: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 
 class _Header extends StatelessWidget {
   final String name;

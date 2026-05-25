@@ -1,12 +1,14 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
-/// Servicio centralizado de SQLite para la app móvil.
+/// Servicio centralizado de SQLite para Nanutech Driver.
 ///
-/// Responsabilidades:
-/// - Crear la base de datos local.
-/// - Crear tablas para sesión, jornada cacheada, eventos offline y logs.
-/// - Aplicar migraciones simples cuando ya existe una BD previa.
+/// Esta BD local permite:
+/// - Mantener sesión del chofer.
+/// - Guardar la jornada actual en caché.
+/// - Guardar eventos offline pendientes.
+/// - Registrar logs de sincronización.
+/// - Mantener el bloqueo local de SOS para HU21.
 class DatabaseService {
   static Database? _database;
 
@@ -25,7 +27,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -39,6 +41,10 @@ class DatabaseService {
   }
 
   static Future<void> _createTables(Database db) async {
+    /// Tabla de sesión local.
+    ///
+    /// Permite que el chofer no tenga que iniciar sesión cada vez que abre la app.
+    /// last_activity_at sirve para expirar sesión por inactividad.
     await db.execute('''
       CREATE TABLE IF NOT EXISTS session_local (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,12 +60,16 @@ class DatabaseService {
       )
     ''');
 
+    /// Migración segura por si la BD ya existía sin last_activity_at.
     try {
       await db.execute(
         'ALTER TABLE session_local ADD COLUMN last_activity_at TEXT',
       );
     } catch (_) {}
 
+    /// Caché de jornada actual.
+    ///
+    /// Sirve para que la app pueda mostrar la jornada aunque no haya internet.
     await db.execute('''
       CREATE TABLE IF NOT EXISTS jornada_cache (
         id TEXT PRIMARY KEY,
@@ -68,12 +78,25 @@ class DatabaseService {
       )
     ''');
 
+    /// Cola offline principal.
+    ///
+    /// Aquí se guardan acciones hechas sin internet:
+    /// - START_JORNADA
+    /// - END_JORNADA
+    /// - SOS_ALERT
+    /// - MECHANICAL_ASSISTANCE
+    ///
+    /// priority:
+    /// - 0 = SOS, máxima prioridad.
+    /// - 1 = Auxilio mecánico.
+    /// - 2 = Jornada u otros eventos normales.
     await db.execute('''
       CREATE TABLE IF NOT EXISTS offline_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         event_type TEXT NOT NULL,
         payload TEXT NOT NULL,
         synced INTEGER DEFAULT 0,
+        priority INTEGER DEFAULT 2,
         retry_count INTEGER DEFAULT 0,
         last_error TEXT,
         created_at TEXT,
@@ -81,6 +104,30 @@ class DatabaseService {
       )
     ''');
 
+    /// Migración segura por si offline_events ya existía sin priority.
+    try {
+      await db.execute(
+        'ALTER TABLE offline_events ADD COLUMN priority INTEGER DEFAULT 2',
+      );
+    } catch (_) {}
+
+    /// Estado local de emergencia HU21.
+    ///
+    /// Sirve para que si el chofer envía SOS y cierra la app,
+    /// al abrirla nuevamente siga bloqueada.
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS emergency_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        sos_locked INTEGER DEFAULT 0,
+        sos_event_id TEXT,
+        sos_message TEXT,
+        created_at TEXT
+      )
+    ''');
+
+    /// Logs simples de sincronización.
+    ///
+    /// Sirve para depurar qué eventos offline se sincronizaron o fallaron.
     await db.execute('''
       CREATE TABLE IF NOT EXISTS sync_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
