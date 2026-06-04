@@ -5,9 +5,9 @@ import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:nanutech_driver_app/features/license/presentation/screens/licencia_screen.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
-
 import '../../../../core/config/api_config.dart';
 import '../../../../core/database/database_service.dart';
 import '../../../../core/sync/sync_service.dart';
@@ -78,8 +78,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   }
 
   void listenConnectivity() {
-    connectivitySubscription =
-        Connectivity().onConnectivityChanged.listen((_) async {
+    connectivitySubscription = Connectivity().onConnectivityChanged.listen((
+      _,
+    ) async {
       final connected = await hasRealInternet();
 
       if (!mounted) return;
@@ -139,8 +140,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     try {
       final host = Uri.parse(ApiConfig.baseUrl).host;
 
-      final result = await InternetAddress.lookup(host)
-          .timeout(const Duration(seconds: 3));
+      final result = await InternetAddress.lookup(
+        host,
+      ).timeout(const Duration(seconds: 3));
 
       return result.isNotEmpty && result.first.rawAddress.isNotEmpty;
     } catch (_) {
@@ -149,10 +151,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   }
 
   void startTimer() {
-    timer = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) => updateElapsed(),
-    );
+    timer = Timer.periodic(const Duration(seconds: 1), (_) => updateElapsed());
   }
 
   void updateElapsed() {
@@ -266,30 +265,21 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   Future<void> saveJornadaCache(JornadaModel jornada) async {
     final db = await DatabaseService.database;
 
-    await db.insert(
-      'jornada_cache',
-      {
-        'id': jornada.id,
-        'data': jsonEncode(jornada.toJson()),
-        'updated_at': DateTime.now().toIso8601String(),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('jornada_cache', {
+      'id': jornada.id,
+      'data': jsonEncode(jornada.toJson()),
+      'updated_at': DateTime.now().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<JornadaModel?> getJornadaCache() async {
     final db = await DatabaseService.database;
 
-    final result = await db.query(
-      'jornada_cache',
-      limit: 1,
-    );
+    final result = await db.query('jornada_cache', limit: 1);
 
     if (result.isEmpty) return null;
 
-    return JornadaModel.fromJson(
-      jsonDecode(result.first['data'].toString()),
-    );
+    return JornadaModel.fromJson(jsonDecode(result.first['data'].toString()));
   }
 
   Future<void> loadCounters() async {
@@ -446,7 +436,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
 
     await finalizarTurnoOffline(observaciones);
   }
-    Duration getTotalDuration(JornadaModel current) {
+
+  Duration getTotalDuration(JornadaModel current) {
     if (current.duracionTotalSegundos != null) {
       return Duration(seconds: current.duracionTotalSegundos!);
     }
@@ -562,48 +553,45 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
       });
 
       startSosPolling();
-
     } catch (e) {
-      showMessage(
-        e.toString().replaceAll('Exception: ', ''),
-      );
+      showMessage(e.toString().replaceAll('Exception: ', ''));
     }
   }
 
   void startSosPolling() {
-  sosPollingTimer?.cancel();
+    sosPollingTimer?.cancel();
 
-  sosPollingTimer = Timer.periodic(
-    const Duration(seconds: 10),
-    (_) => checkSosResolved(),
-  );
-}
-
-Future<void> checkSosResolved() async {
-  if (!sosLocked || jornada == null) return;
-
-  try {
-    final hasSos = await emergencyApi.hasActiveSos(
-      token: widget.token,
-      jornadaId: jornada!.id,
+    sosPollingTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => checkSosResolved(),
     );
-
-    if (!hasSos && mounted) {
-      sosPollingTimer?.cancel();
-
-      setState(() {
-        sosLocked = false;
-      });
-
-      showMessage(
-        'Alerta SOS resuelta. Sistema desbloqueado.',
-        success: true,
-      );
-    }
-  } catch (_) {
-    // Si falla la consulta, la app mantiene el bloqueo por seguridad.
   }
-}
+
+  Future<void> checkSosResolved() async {
+    if (!sosLocked || jornada == null) return;
+
+    try {
+      final hasSos = await emergencyApi.hasActiveSos(
+        token: widget.token,
+        jornadaId: jornada!.id,
+      );
+
+      if (!hasSos && mounted) {
+        sosPollingTimer?.cancel();
+
+        setState(() {
+          sosLocked = false;
+        });
+
+        showMessage(
+          'Alerta SOS resuelta. Sistema desbloqueado.',
+          success: true,
+        );
+      }
+    } catch (_) {
+      // Si falla la consulta, la app mantiene el bloqueo por seguridad.
+    }
+  }
 
   /// HU21 - Abre modal de Auxilio Mecánico y envía solicitud.
   ///
@@ -669,9 +657,7 @@ Future<void> checkSosResolved() async {
         success: true,
       );
     } catch (e) {
-      showMessage(
-        e.toString().replaceAll('Exception: ', ''),
-      );
+      showMessage(e.toString().replaceAll('Exception: ', ''));
     }
   }
 
@@ -702,16 +688,15 @@ Future<void> checkSosResolved() async {
 
     final events = await syncService.getPendingEvents();
 
-    final sortedEvents = [...events]..sort((a, b) {
+    final sortedEvents = [...events]
+      ..sort((a, b) {
         int priority(String type) {
           if (type == 'SOS_ALERT') return 0;
           if (type == 'MECHANICAL_ASSISTANCE') return 1;
           return 2;
         }
 
-        return priority(a['event_type']).compareTo(
-          priority(b['event_type']),
-        );
+        return priority(a['event_type']).compareTo(priority(b['event_type']));
       });
 
     for (final event in sortedEvents) {
@@ -804,10 +789,7 @@ Future<void> checkSosResolved() async {
               backgroundColor: const Color(0xffdc2626),
               foregroundColor: Colors.white,
             ),
-            onPressed: () => Navigator.pop(
-              context,
-              controller.text.trim(),
-            ),
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
             icon: const Icon(Icons.stop_circle),
             label: const Text('Finalizar'),
           ),
@@ -843,9 +825,7 @@ Future<void> checkSosResolved() async {
 
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(
-        builder: (_) => const LoginScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
       (_) => false,
     );
   }
@@ -910,6 +890,8 @@ Future<void> checkSosResolved() async {
                           horasTrabajadas: formatDuration(horasTrabajadas),
                         ),
                         const SizedBox(height: 18),
+                        const _LicenciaCard(),
+                        const SizedBox(height: 18),
                         if (current == null || current.estado == 'COMPLETADA')
                           _NoJourneyCard(
                             jornadasMes: jornadasMes,
@@ -931,8 +913,7 @@ Future<void> checkSosResolved() async {
                         if (current != null && current.estado == 'EN_PROCESO')
                           _EmergencyActionsCard(
                             onSosCompleted: sendSosAlert,
-                            onMechanicalAssistance:
-                                openMechanicalAssistance,
+                            onMechanicalAssistance: openMechanicalAssistance,
                           ),
                         const SizedBox(height: 18),
                         const _RulesCard(),
@@ -959,11 +940,7 @@ class _SosLockedScreen extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.lock,
-                color: Colors.white,
-                size: 86,
-              ),
+              Icon(Icons.lock, color: Colors.white, size: 86),
               SizedBox(height: 24),
               Text(
                 '¡ALERTA SOS!',
@@ -978,10 +955,7 @@ class _SosLockedScreen extends StatelessWidget {
               Text(
                 'Ubicación enviada al administrador. Sistema bloqueado por seguridad.',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 19,
-                ),
+                style: TextStyle(color: Colors.white, fontSize: 19),
               ),
             ],
           ),
@@ -1004,10 +978,7 @@ class _EmergencyActionsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        SosPanicButton(
-          enabled: true,
-          onCompleted: onSosCompleted,
-        ),
+        SosPanicButton(enabled: true, onCompleted: onSosCompleted),
         const SizedBox(height: 12),
         SizedBox(
           width: double.infinity,
@@ -1017,10 +988,7 @@ class _EmergencyActionsCard extends StatelessWidget {
             label: const Text('Auxilio Mecánico'),
             style: OutlinedButton.styleFrom(
               foregroundColor: const Color(0xffea580c),
-              side: const BorderSide(
-                color: Color(0xffea580c),
-                width: 1.4,
-              ),
+              side: const BorderSide(color: Color(0xffea580c), width: 1.4),
               padding: const EdgeInsets.symmetric(vertical: 15),
               textStyle: const TextStyle(
                 fontSize: 16,
@@ -1033,7 +1001,6 @@ class _EmergencyActionsCard extends StatelessWidget {
     );
   }
 }
-
 
 class _Header extends StatelessWidget {
   final String name;
@@ -1055,31 +1022,19 @@ class _Header extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: isOnline
-              ? const [
-                  Color(0xff1e3a8a),
-                  Color(0xff2563eb),
-                ]
-              : const [
-                  Color(0xff92400e),
-                  Color(0xfff97316),
-                ],
+              ? const [Color(0xff1e3a8a), Color(0xff2563eb)]
+              : const [Color(0xff92400e), Color(0xfff97316)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: const BorderRadius.vertical(
-          bottom: Radius.circular(28),
-        ),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(
-                Icons.local_shipping,
-                color: Colors.white,
-                size: 34,
-              ),
+              const Icon(Icons.local_shipping, color: Colors.white, size: 34),
               const SizedBox(width: 10),
               const Expanded(
                 child: Text(
@@ -1094,10 +1049,7 @@ class _Header extends StatelessWidget {
               IconButton(
                 onPressed: onLogout,
                 tooltip: 'Cerrar sesión',
-                icon: const Icon(
-                  Icons.logout,
-                  color: Colors.white,
-                ),
+                icon: const Icon(Icons.logout, color: Colors.white),
               ),
             ],
           ),
@@ -1115,11 +1067,9 @@ class _Header extends StatelessWidget {
             syncing
                 ? 'Sincronizando pendientes...'
                 : isOnline
-                    ? 'Conectado y listo para operar'
-                    : 'Modo offline: tus acciones se guardarán localmente',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.9),
-            ),
+                ? 'Conectado y listo para operar'
+                : 'Modo offline: tus acciones se guardarán localmente',
+            style: TextStyle(color: Colors.white.withOpacity(0.9)),
           ),
         ],
       ),
@@ -1131,10 +1081,7 @@ class _StatsRow extends StatelessWidget {
   final int jornadasMes;
   final String horasTrabajadas;
 
-  const _StatsRow({
-    required this.jornadasMes,
-    required this.horasTrabajadas,
-  });
+  const _StatsRow({required this.jornadasMes, required this.horasTrabajadas});
 
   @override
   Widget build(BuildContext context) {
@@ -1179,10 +1126,7 @@ class _StatCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 12,
-          ),
+          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 12),
         ],
       ),
       child: Row(
@@ -1195,10 +1139,7 @@ class _StatCard extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: TextStyle(
-                    color: Colors.grey.shade600,
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
                 ),
                 Text(
                   value,
@@ -1246,10 +1187,7 @@ class _NoJourneyCard extends StatelessWidget {
           const SizedBox(height: 12),
           const Text(
             'No tienes jornadas asignadas',
-            style: TextStyle(
-              fontSize: 21,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
           Text(
@@ -1302,10 +1240,7 @@ class _JourneyCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 16,
-          ),
+          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 16),
         ],
       ),
       child: Column(
@@ -1315,17 +1250,10 @@ class _JourneyCard extends StatelessWidget {
           const SizedBox(height: 14),
           Text(
             '${jornada.origen} → ${jornada.destino}',
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-            ),
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 18),
-          _InfoLine(
-            icon: Icons.badge,
-            label: 'Conductor',
-            value: driverName,
-          ),
+          _InfoLine(icon: Icons.badge, label: 'Conductor', value: driverName),
           _InfoLine(
             icon: Icons.local_shipping,
             label: 'Placa',
@@ -1358,9 +1286,7 @@ class _JourneyCard extends StatelessWidget {
                 children: [
                   Text(
                     'Tiempo Transcurrido',
-                    style: TextStyle(
-                      color: Colors.grey.shade600,
-                    ),
+                    style: TextStyle(color: Colors.grey.shade600),
                   ),
                   const SizedBox(height: 6),
                   Text(
@@ -1427,10 +1353,7 @@ class _StatusChip extends StatelessWidget {
       ),
       child: Text(
         status,
-        style: TextStyle(
-          color: color.shade700,
-          fontWeight: FontWeight.bold,
-        ),
+        style: TextStyle(color: color.shade700, fontWeight: FontWeight.bold),
       ),
     );
   }
@@ -1495,10 +1418,7 @@ class _RulesCard extends StatelessWidget {
         children: [
           const Text(
             'Reglas Generales de NANU TECH',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 14),
           ...rules.map(
@@ -1519,9 +1439,7 @@ class _RulesCard extends StatelessWidget {
                         children: [
                           TextSpan(
                             text: '${rule.$1}: ',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                            ),
+                            style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           TextSpan(text: rule.$2),
                         ],
@@ -1533,6 +1451,36 @@ class _RulesCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _LicenciaCard extends StatelessWidget {
+  const _LicenciaCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: ListTile(
+        leading: const Icon(Icons.badge, color: Color(0xff2563eb)),
+        title: const Text(
+          'Mi Licencia',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: const Text('Consultar y actualizar licencia'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const LicenciaScreen()),
+          );
+        },
       ),
     );
   }
