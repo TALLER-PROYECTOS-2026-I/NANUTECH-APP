@@ -17,6 +17,7 @@ import '../../services/jornada_api_service.dart';
 
 import '../../../authentication/presentation/screens/login_screen.dart';
 import '../../../authentication/services/session_service.dart';
+import '../../../historial_jornadas/presentation/screens/historial_jornadas_screen.dart';
 
 import '../../../emergency_alerts/services/emergency_alert_api_service.dart';
 import '../../../emergency_alerts/services/location_service.dart';
@@ -1087,9 +1088,9 @@ print('================================');
   if (selectedMenuIndex == 2) {
     return Builder(
   builder: (scaffoldContext) {
-    return DriverHistoryScreen(
-      conductorId: widget.conductorId,
+    return HistorialJornadasScreen(
       token: widget.token,
+      nombres: widget.nombres,
       onBackToDashboard: () {
         setState(() {
           selectedMenuIndex = 0;
