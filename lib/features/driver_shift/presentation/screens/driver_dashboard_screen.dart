@@ -26,6 +26,9 @@ import '../../../emergency_alerts/presentation/widgets/mechanical_assistance_mod
 import '../../../fuel_registration/services/fuel_api_service.dart';
 import '../../../fuel_registration/presentation/widgets/fuel_registration_modal.dart';
 
+import '../../../license/presentation/screens/license_screen.dart';
+import '../../../driver_history/presentation/screens/driver_history_screen.dart';
+
 class DriverDashboardScreen extends StatefulWidget {
   final String conductorId;
   final String token;
@@ -71,6 +74,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   /// Cuando se dispara SOS, la app queda bloqueada visualmente
   /// hasta que un administrador levante la alerta desde el panel.
   bool sosLocked = false;
+  int selectedMenuIndex = 0;
 
   JornadaModel? jornada;
   Duration elapsed = Duration.zero;
@@ -1059,6 +1063,111 @@ print('================================');
     super.dispose();
   }
 
+
+  Widget buildSelectedContent(JornadaModel? current) {
+  if (selectedMenuIndex == 1) {
+    return Builder(
+  builder: (scaffoldContext) {
+    return LicenseScreen(
+      conductorId: widget.conductorId,
+      token: widget.token,
+      onBackToDashboard: () {
+        setState(() {
+          selectedMenuIndex = 0;
+        });
+      },
+      onOpenMenu: () {
+        Scaffold.of(scaffoldContext).openDrawer();
+      },
+    );
+  },
+);
+  }
+
+  if (selectedMenuIndex == 2) {
+    return Builder(
+  builder: (scaffoldContext) {
+    return DriverHistoryScreen(
+      conductorId: widget.conductorId,
+      token: widget.token,
+      onBackToDashboard: () {
+        setState(() {
+          selectedMenuIndex = 0;
+        });
+      },
+      onOpenMenu: () {
+        Scaffold.of(scaffoldContext).openDrawer();
+      },
+    );
+  },
+);
+  }
+
+  return buildDashboardContent(current);
+}
+
+Widget buildDashboardContent(JornadaModel? current) {
+  return RefreshIndicator(
+    onRefresh: loadJornada,
+    child: ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        Builder(
+          builder: (scaffoldContext) {
+          return _Header(
+            name: widget.nombres,
+              isOnline: isOnline,
+              syncing: syncing,
+              onLogout: logout,
+              onOpenMenu: () {
+                Scaffold.of(scaffoldContext).openDrawer();
+              },
+          );
+        },
+      ),
+        Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            children: [
+              _StatsRow(
+                jornadasMes: jornadasMes,
+                horasTrabajadas: formatDuration(horasTrabajadas),
+              ),
+              const SizedBox(height: 18),
+              if (current == null || current.estado == 'COMPLETADA')
+                _NoJourneyCard(
+                  jornadasMes: jornadasMes,
+                  horasTrabajadas: formatDuration(horasTrabajadas),
+                  completed: current?.estado == 'COMPLETADA',
+                )
+              else
+                _JourneyCard(
+                  jornada: current,
+                  driverName: widget.nombres,
+                  elapsed: elapsed,
+                  formatDuration: formatDuration,
+                  formatDate: formatDate,
+                  formatDateTime: formatDateTime,
+                  onStart: iniciarTurno,
+                  onFinish: finalizarTurno,
+                ),
+              const SizedBox(height: 18),
+              if (current != null && current.estado == 'EN_PROCESO')
+                _EmergencyActionsCard(
+                  onSosCompleted: sendSosAlert,
+                  onMechanicalAssistance: openMechanicalAssistance,
+                  onFuelRegistration: openFuelRegistration,
+                ),
+              const SizedBox(height: 18),
+              const _RulesCard(),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
   @override
   Widget build(BuildContext context) {
     final current = jornada;
@@ -1069,60 +1178,18 @@ print('================================');
 
     return Scaffold(
       backgroundColor: const Color(0xfff4f7fb),
-      body: loading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: loadJornada,
-              child: ListView(
-                padding: EdgeInsets.zero,
-                children: [
-                  _Header(
-                    name: widget.nombres,
-                    isOnline: isOnline,
-                    syncing: syncing,
-                    onLogout: logout,
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(18),
-                    child: Column(
-                      children: [
-                        _StatsRow(
-                          jornadasMes: jornadasMes,
-                          horasTrabajadas: formatDuration(horasTrabajadas),
-                        ),
-                        const SizedBox(height: 18),
-                        if (current == null || current.estado == 'COMPLETADA')
-                          _NoJourneyCard(
-                            jornadasMes: jornadasMes,
-                            horasTrabajadas: formatDuration(horasTrabajadas),
-                            completed: current?.estado == 'COMPLETADA',
-                          )
-                        else
-                          _JourneyCard(
-                            jornada: current,
-                            driverName: widget.nombres,
-                            elapsed: elapsed,
-                            formatDuration: formatDuration,
-                            formatDate: formatDate,
-                            formatDateTime: formatDateTime,
-                            onStart: iniciarTurno,
-                            onFinish: finalizarTurno,
-                          ),
-                        const SizedBox(height: 18),
-                        if (current != null && current.estado == 'EN_PROCESO')
-                          _EmergencyActionsCard(
-                            onSosCompleted: sendSosAlert,
-                            onMechanicalAssistance: openMechanicalAssistance,
-                            onFuelRegistration: openFuelRegistration,
-                          ),
-                        const SizedBox(height: 18),
-                        const _RulesCard(),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
+      drawer: _DriverSideMenu(
+  selectedIndex: selectedMenuIndex,
+  onSelected: (index) {
+    Navigator.pop(context);
+    setState(() {
+      selectedMenuIndex = index;
+    });
+  },
+),
+body: loading
+    ? const Center(child: CircularProgressIndicator())
+    : buildSelectedContent(current),
     );
   }
 }
@@ -1251,17 +1318,137 @@ class _EmergencyActionsCard extends StatelessWidget {
 }
 
 
+class _DriverSideMenu extends StatelessWidget {
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+
+  const _DriverSideMenu({
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(22),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Color(0xff1e3a8a),
+                    Color(0xff2563eb),
+                  ],
+                ),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.local_shipping,
+                    color: Colors.white,
+                    size: 42,
+                  ),
+                  SizedBox(height: 12),
+                  Text(
+                    'NANUTECH Driver',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 21,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Panel del Chofer',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ],
+              ),
+            ),
+            _MenuTile(
+              index: 0,
+              selectedIndex: selectedIndex,
+              icon: Icons.dashboard,
+              title: 'Dashboard',
+              onTap: onSelected,
+            ),
+            _MenuTile(
+              index: 1,
+              selectedIndex: selectedIndex,
+              icon: Icons.badge,
+              title: 'Mi Licencia',
+              onTap: onSelected,
+            ),
+            _MenuTile(
+              index: 2,
+              selectedIndex: selectedIndex,
+              icon: Icons.history,
+              title: 'Historial de Jornadas',
+              onTap: onSelected,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MenuTile extends StatelessWidget {
+  final int index;
+  final int selectedIndex;
+  final IconData icon;
+  final String title;
+  final ValueChanged<int> onTap;
+
+  const _MenuTile({
+    required this.index,
+    required this.selectedIndex,
+    required this.icon,
+    required this.title,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = index == selectedIndex;
+
+    return ListTile(
+      selected: selected,
+      selectedTileColor: const Color(0xffeff6ff),
+      leading: Icon(
+        icon,
+        color: selected ? const Color(0xff2563eb) : Colors.grey.shade700,
+      ),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+          color: selected ? const Color(0xff1e3a8a) : Colors.black87,
+        ),
+      ),
+      onTap: () => onTap(index),
+    );
+  }
+}
+
+
 class _Header extends StatelessWidget {
   final String name;
   final bool isOnline;
   final bool syncing;
   final VoidCallback onLogout;
+  final VoidCallback onOpenMenu;
 
   const _Header({
     required this.name,
     required this.isOnline,
     required this.syncing,
     required this.onLogout,
+    required this.onOpenMenu,
   });
 
   @override
@@ -1291,6 +1478,10 @@ class _Header extends StatelessWidget {
         children: [
           Row(
             children: [
+              IconButton(
+                onPressed: onOpenMenu,
+                icon: const Icon(Icons.menu, color: Colors.white),
+              ),
               const Icon(
                 Icons.local_shipping,
                 color: Colors.white,
