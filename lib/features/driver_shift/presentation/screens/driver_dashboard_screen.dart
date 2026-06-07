@@ -16,6 +16,7 @@ import '../../domain/jornada_model.dart';
 import '../../services/jornada_api_service.dart';
 
 import '../../../authentication/presentation/screens/login_screen.dart';
+import '../../../historial_jornadas/presentation/screens/historial_jornadas_screen.dart';
 import '../../../authentication/services/session_service.dart';
 
 import '../../../emergency_alerts/services/emergency_alert_api_service.dart';
@@ -936,6 +937,11 @@ Future<void> checkSosResolved() async {
                           ),
                         const SizedBox(height: 18),
                         const _RulesCard(),
+                        const SizedBox(height: 18),
+                        _HistorialNavCard(
+                          token: widget.token,
+                          nombres: widget.nombres,
+                        ),
                       ],
                     ),
                   ),
@@ -1537,3 +1543,97 @@ class _RulesCard extends StatelessWidget {
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tarjeta de navegación al Historial de Jornadas
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _HistorialNavCard extends StatelessWidget {
+  final String token;
+  final String nombres;
+
+  const _HistorialNavCard({
+    required this.token,
+    required this.nombres,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => HistorialJornadasScreen(
+            token: token,
+            nombres: nombres,
+          ),
+        ),
+      ),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xff1e3a8a), Color(0xff2563eb)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xff2563eb).withOpacity(0.35),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.history_rounded,
+                color: Colors.white,
+                size: 26,
+              ),
+            ),
+            const SizedBox(width: 16),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Historial de Jornadas',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 3),
+                  Text(
+                    'Consulta tus jornadas completadas, métricas y estadísticas',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.arrow_forward_ios_rounded,
+              color: Colors.white70,
+              size: 16,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
