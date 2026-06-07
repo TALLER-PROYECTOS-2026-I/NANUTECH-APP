@@ -23,8 +23,6 @@ import '../../../emergency_alerts/services/location_service.dart';
 import '../../../emergency_alerts/presentation/widgets/sos_panic_button.dart';
 import '../../../emergency_alerts/presentation/widgets/mechanical_assistance_modal.dart';
 
-import '../../../historial_jornadas/presentation/screens/historial_jornadas_screen.dart';
-
 class DriverDashboardScreen extends StatefulWidget {
   final String conductorId;
   final String token;
@@ -937,20 +935,6 @@ Future<void> checkSosResolved() async {
                                 openMechanicalAssistance,
                           ),
                         const SizedBox(height: 18),
-                        _HistorialButton(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => HistorialJornadasScreen(
-                                  conductorId: widget.conductorId,
-                                  token: widget.token,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 18),
                         const _RulesCard(),
                       ],
                     ),
@@ -1549,33 +1533,6 @@ class _RulesCard extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _HistorialButton extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _HistorialButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: OutlinedButton.icon(
-        onPressed: onTap,
-        icon: const Icon(Icons.history),
-        label: const Text('Ver Historial de Jornadas'),
-        style: OutlinedButton.styleFrom(
-          foregroundColor: const Color(0xFF1E3A8A),
-          side: const BorderSide(color: Color(0xFF1E3A8A), width: 1.4),
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          textStyle: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
       ),
     );
   }
