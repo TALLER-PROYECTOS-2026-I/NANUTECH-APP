@@ -27,7 +27,7 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: (db, version) async {
         await _createTables(db);
       },
@@ -122,6 +122,22 @@ class DatabaseService {
         sos_event_id TEXT,
         sos_message TEXT,
         created_at TEXT
+      )
+    ''');
+
+    /// Registros offline de combustible HU15.
+    ///
+    /// Guarda abastecimientos cuando no hay internet.
+    /// La HU15 exige límite máximo de 10 registros offline pendientes.
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS offline_fuel_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        payload TEXT NOT NULL,
+        synced INTEGER DEFAULT 0,
+        retry_count INTEGER DEFAULT 0,
+        last_error TEXT,
+        created_at TEXT,
+        synced_at TEXT
       )
     ''');
 

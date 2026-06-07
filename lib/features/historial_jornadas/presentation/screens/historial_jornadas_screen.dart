@@ -27,11 +27,18 @@ const _kBorder   = Color(0xFFE2E8F0);
 class HistorialJornadasScreen extends StatefulWidget {
   final String token;
   final String nombres;
+  /// Callback opcional para volver al dashboard por el menú lateral.
+  /// Si es null, usa Navigator.pop().
+  final VoidCallback? onBackToDashboard;
+  /// Callback opcional para abrir el drawer del menú lateral.
+  final VoidCallback? onOpenMenu;
 
   const HistorialJornadasScreen({
     super.key,
     required this.token,
     required this.nombres,
+    this.onBackToDashboard,
+    this.onOpenMenu,
   });
 
   @override
@@ -295,7 +302,9 @@ class _HistorialJornadasScreenState extends State<HistorialJornadasScreen>
 
   Widget _pageHeader(BuildContext context) => Row(children: [
     GestureDetector(
-      onTap: () => Navigator.pop(context),
+      onTap: () => widget.onBackToDashboard != null
+              ? widget.onBackToDashboard!()
+              : Navigator.pop(context),
       child: Container(
         width: 38, height: 38,
         decoration: BoxDecoration(

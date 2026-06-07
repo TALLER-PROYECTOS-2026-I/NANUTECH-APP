@@ -1,6 +1,7 @@
 class JornadaModel {
   final String id;
   final String conductorId;
+  final String? unidadId;
   final String origen;
   final String destino;
   final String estado;
@@ -15,6 +16,7 @@ class JornadaModel {
   JornadaModel({
     required this.id,
     required this.conductorId,
+    this.unidadId,
     required this.origen,
     required this.destino,
     required this.estado,
@@ -31,6 +33,7 @@ class JornadaModel {
     return JornadaModel(
       id: (json['id'] ?? '').toString(),
       conductorId: (json['conductor_id'] ?? '').toString(),
+      unidadId: (json['unidad_id'] ?? json['camion_id'])?.toString(),
       origen: (json['origen'] ?? 'No definido').toString(),
       destino: (json['destino'] ?? 'No definido').toString(),
       estado: (json['estado'] ?? '').toString().toUpperCase(),
@@ -50,6 +53,7 @@ class JornadaModel {
     return {
       'id': id,
       'conductor_id': conductorId,
+      'unidad_id': unidadId,
       'origen': origen,
       'destino': destino,
       'estado': estado,
