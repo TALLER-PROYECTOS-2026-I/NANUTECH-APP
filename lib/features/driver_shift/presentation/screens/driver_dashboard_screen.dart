@@ -23,6 +23,12 @@ import '../../../emergency_alerts/services/location_service.dart';
 import '../../../emergency_alerts/presentation/widgets/sos_panic_button.dart';
 import '../../../emergency_alerts/presentation/widgets/mechanical_assistance_modal.dart';
 
+import '../../../fuel_registration/services/fuel_api_service.dart';
+import '../../../fuel_registration/presentation/widgets/fuel_registration_modal.dart';
+
+import '../../../license/presentation/screens/license_screen.dart';
+import '../../../driver_history/presentation/screens/driver_history_screen.dart';
+
 class DriverDashboardScreen extends StatefulWidget {
   final String conductorId;
   final String token;
@@ -48,6 +54,11 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   /// POST /alertas/sos y POST /alertas/auxilio.
   final emergencyApi = EmergencyAlertApiService();
 
+  /// Servicio encargado de consumir endpoints HU15:
+  /// GET /combustible/ultimo-km/{unidadId}
+  /// POST /combustible
+  final fuelApi = FuelApiService();
+
   /// Servicio encargado de obtener latitud y longitud reales
   /// desde el GPS del dispositivo.
   final locationService = LocationService();
@@ -63,6 +74,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
   /// Cuando se dispara SOS, la app queda bloqueada visualmente
   /// hasta que un administrador levante la alerta desde el panel.
   bool sosLocked = false;
+  int selectedMenuIndex = 0;
 
   JornadaModel? jornada;
   Duration elapsed = Duration.zero;
@@ -373,6 +385,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     final localUpdated = JornadaModel(
       id: jornada!.id,
       conductorId: jornada!.conductorId,
+      unidadId: jornada!.unidadId,
       origen: jornada!.origen,
       destino: jornada!.destino,
       estado: 'EN_PROCESO',
@@ -481,6 +494,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen> {
     final localUpdated = JornadaModel(
       id: jornada!.id,
       conductorId: jornada!.conductorId,
+      unidadId: jornada!.unidadId,
       origen: jornada!.origen,
       destino: jornada!.destino,
       estado: 'COMPLETADA',
@@ -604,6 +618,119 @@ Future<void> checkSosResolved() async {
     // Si falla la consulta, la app mantiene el bloqueo por seguridad.
   }
 }
+
+
+/// HU15 - Abre el modal de Registro de Combustible.
+///
+/// Flujo:
+/// 1. Valida que exista una jornada EN_PROCESO.
+/// 2. Obtiene el último kilometraje desde backend.
+/// 3. Muestra modal con placa, estado de red y campos obligatorios.
+/// 4. Obtiene ubicación real del dispositivo.
+/// 5. Envía el registro al backend.
+/// 6. Muestra toast de éxito con rendimiento calculado.
+Future<void> openFuelRegistration() async {
+  if (jornada == null || jornada!.estado != 'EN_PROCESO') {
+    showMessage('Solo puedes registrar combustible con una jornada en proceso.');
+    return;
+  }
+
+  final unidadId = jornada!.unidadId;
+
+  if (unidadId == null || unidadId.isEmpty) {
+    showMessage('No se encontró la unidad asociada a la jornada.');
+    return;
+  }
+
+  try {
+    print('========== TOKEN HU15 ==========');
+print(widget.token);
+print('TOKEN VACIO: ${widget.token.isEmpty}');
+print('UNIDAD ID: $unidadId');
+print('================================');
+    final lastMileageResponse = await fuelApi.getLastMileage(
+      token: widget.token,
+      unidadId: unidadId,
+    );
+
+    final ultimoKilometraje = NumberParser.toDouble(
+      lastMileageResponse['data']?['ultimo_kilometraje'],
+    );
+
+    if (!mounted) return;
+
+    final result = await showModalBottomSheet<FuelRegistrationResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => FuelRegistrationModal(
+        placa: jornada!.placa ?? 'No disponible',
+        isOnline: isOnline,
+        ultimoKilometraje: ultimoKilometraje,
+      ),
+    );
+
+    if (result == null) return;
+
+    final position = await locationService.getCurrentPosition();
+
+    final payload = {
+      'jornada_id': jornada!.id,
+      'conductor_id': widget.conductorId,
+      'galones': result.galones,
+      'costo_total': result.costoTotal,
+      'kilometraje_actual': result.kilometrajeActual,
+      'foto_comprobante_url': result.fotoComprobanteUrl,
+      'latitud': position.latitude,
+      'longitud': position.longitude,
+      'created_offline': !isOnline,
+      'timestamp_local': DateTime.now().toIso8601String(),
+    };
+
+    if (isOnline) {
+      final response = await fuelApi.registerFuel(
+        token: widget.token,
+        jornadaId: jornada!.id,
+        conductorId: widget.conductorId,
+        galones: result.galones,
+        costoTotal: result.costoTotal,
+        kilometrajeActual: result.kilometrajeActual,
+        fotoComprobanteUrl: result.fotoComprobanteUrl,
+        latitud: position.latitude,
+        longitud: position.longitude,
+        createdOffline: false,
+      );
+
+      await sessionService.updateLastActivity();
+
+      showMessage(
+        response['message'] ?? '¡Combustible registrado exitosamente!',
+        success: true,
+      );
+    } else {
+      await fuelApi.saveOfflineFuelRecord(payload: payload);
+      await sessionService.updateLastActivity();
+
+      showMessage(
+        'Sin conexión. Registro de combustible guardado localmente.',
+        success: true,
+      );
+    }
+
+
+    
+  } on DioException catch (e) {
+    showMessage(
+      e.response?.data?['message'] ??
+          'No se pudo registrar el combustible.',
+    );
+  } catch (e) {
+    showMessage(
+      e.toString().replaceAll('Exception: ', ''),
+    );
+  }
+}
+
 
   /// HU21 - Abre modal de Auxilio Mecánico y envía solicitud.
   ///
@@ -772,12 +899,70 @@ Future<void> checkSosResolved() async {
       }
     }
 
+    await syncPendingFuelRecords();
+
     if (mounted) {
       setState(() {
         syncing = false;
       });
     }
   }
+
+  Future<void> syncPendingFuelRecords() async {
+  final db = await DatabaseService.database;
+
+  final records = await db.query(
+    'offline_fuel_records',
+    where: 'synced = ?',
+    whereArgs: [0],
+    orderBy: 'created_at ASC',
+  );
+
+  for (final record in records) {
+    try {
+      final payload = jsonDecode(record['payload'].toString());
+
+      await fuelApi.registerFuel(
+        token: widget.token,
+        jornadaId: payload['jornada_id'],
+        conductorId: payload['conductor_id'],
+        galones: NumberParser.toDouble(payload['galones']),
+        costoTotal: NumberParser.toDouble(payload['costo_total']),
+        kilometrajeActual: NumberParser.toDouble(
+          payload['kilometraje_actual'],
+        ),
+        fotoComprobanteUrl: payload['foto_comprobante_url'],
+        latitud: NumberParser.toDouble(payload['latitud']),
+        longitud: NumberParser.toDouble(payload['longitud']),
+        createdOffline: true,
+      );
+
+      await db.update(
+        'offline_fuel_records',
+        {
+          'synced': 1,
+          'synced_at': DateTime.now().toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [record['id']],
+      );
+
+      await syncService.addLog(
+        'Registro combustible offline ${record['id']} sincronizado',
+      );
+    } catch (e) {
+      await db.update(
+        'offline_fuel_records',
+        {
+          'retry_count': (record['retry_count'] as int? ?? 0) + 1,
+          'last_error': e.toString(),
+        },
+        where: 'id = ?',
+        whereArgs: [record['id']],
+      );
+    }
+  }
+}
 
   Future<String?> askObservaciones() {
     final controller = TextEditingController();
@@ -878,6 +1063,111 @@ Future<void> checkSosResolved() async {
     super.dispose();
   }
 
+
+  Widget buildSelectedContent(JornadaModel? current) {
+  if (selectedMenuIndex == 1) {
+    return Builder(
+  builder: (scaffoldContext) {
+    return LicenseScreen(
+      conductorId: widget.conductorId,
+      token: widget.token,
+      onBackToDashboard: () {
+        setState(() {
+          selectedMenuIndex = 0;
+        });
+      },
+      onOpenMenu: () {
+        Scaffold.of(scaffoldContext).openDrawer();
+      },
+    );
+  },
+);
+  }
+
+  if (selectedMenuIndex == 2) {
+    return Builder(
+  builder: (scaffoldContext) {
+    return DriverHistoryScreen(
+      conductorId: widget.conductorId,
+      token: widget.token,
+      onBackToDashboard: () {
+        setState(() {
+          selectedMenuIndex = 0;
+        });
+      },
+      onOpenMenu: () {
+        Scaffold.of(scaffoldContext).openDrawer();
+      },
+    );
+  },
+);
+  }
+
+  return buildDashboardContent(current);
+}
+
+Widget buildDashboardContent(JornadaModel? current) {
+  return RefreshIndicator(
+    onRefresh: loadJornada,
+    child: ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        Builder(
+          builder: (scaffoldContext) {
+          return _Header(
+            name: widget.nombres,
+              isOnline: isOnline,
+              syncing: syncing,
+              onLogout: logout,
+              onOpenMenu: () {
+                Scaffold.of(scaffoldContext).openDrawer();
+              },
+          );
+        },
+      ),
+        Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            children: [
+              _StatsRow(
+                jornadasMes: jornadasMes,
+                horasTrabajadas: formatDuration(horasTrabajadas),
+              ),
+              const SizedBox(height: 18),
+              if (current == null || current.estado == 'COMPLETADA')
+                _NoJourneyCard(
+                  jornadasMes: jornadasMes,
+                  horasTrabajadas: formatDuration(horasTrabajadas),
+                  completed: current?.estado == 'COMPLETADA',
+                )
+              else
+                _JourneyCard(
+                  jornada: current,
+                  driverName: widget.nombres,
+                  elapsed: elapsed,
+                  formatDuration: formatDuration,
+                  formatDate: formatDate,
+                  formatDateTime: formatDateTime,
+                  onStart: iniciarTurno,
+                  onFinish: finalizarTurno,
+                ),
+              const SizedBox(height: 18),
+              if (current != null && current.estado == 'EN_PROCESO')
+                _EmergencyActionsCard(
+                  onSosCompleted: sendSosAlert,
+                  onMechanicalAssistance: openMechanicalAssistance,
+                  onFuelRegistration: openFuelRegistration,
+                ),
+              const SizedBox(height: 18),
+              const _RulesCard(),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
   @override
   Widget build(BuildContext context) {
     final current = jornada;
@@ -888,63 +1178,33 @@ Future<void> checkSosResolved() async {
 
     return Scaffold(
       backgroundColor: const Color(0xfff4f7fb),
-      body: loading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: loadJornada,
-              child: ListView(
-                padding: EdgeInsets.zero,
-                children: [
-                  _Header(
-                    name: widget.nombres,
-                    isOnline: isOnline,
-                    syncing: syncing,
-                    onLogout: logout,
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(18),
-                    child: Column(
-                      children: [
-                        _StatsRow(
-                          jornadasMes: jornadasMes,
-                          horasTrabajadas: formatDuration(horasTrabajadas),
-                        ),
-                        const SizedBox(height: 18),
-                        if (current == null || current.estado == 'COMPLETADA')
-                          _NoJourneyCard(
-                            jornadasMes: jornadasMes,
-                            horasTrabajadas: formatDuration(horasTrabajadas),
-                            completed: current?.estado == 'COMPLETADA',
-                          )
-                        else
-                          _JourneyCard(
-                            jornada: current,
-                            driverName: widget.nombres,
-                            elapsed: elapsed,
-                            formatDuration: formatDuration,
-                            formatDate: formatDate,
-                            formatDateTime: formatDateTime,
-                            onStart: iniciarTurno,
-                            onFinish: finalizarTurno,
-                          ),
-                        const SizedBox(height: 18),
-                        if (current != null && current.estado == 'EN_PROCESO')
-                          _EmergencyActionsCard(
-                            onSosCompleted: sendSosAlert,
-                            onMechanicalAssistance:
-                                openMechanicalAssistance,
-                          ),
-                        const SizedBox(height: 18),
-                        const _RulesCard(),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
+      drawer: _DriverSideMenu(
+  selectedIndex: selectedMenuIndex,
+  onSelected: (index) {
+    Navigator.pop(context);
+    setState(() {
+      selectedMenuIndex = index;
+    });
+  },
+),
+body: loading
+    ? const Center(child: CircularProgressIndicator())
+    : buildSelectedContent(current),
     );
   }
 }
+
+
+class NumberParser {
+  static double toDouble(dynamic value) {
+    if (value == null) return 0;
+
+    if (value is num) return value.toDouble();
+
+    return double.tryParse(value.toString()) ?? 0;
+  }
+}
+
 
 class _SosLockedScreen extends StatelessWidget {
   const _SosLockedScreen();
@@ -994,10 +1254,12 @@ class _SosLockedScreen extends StatelessWidget {
 class _EmergencyActionsCard extends StatelessWidget {
   final Future<void> Function() onSosCompleted;
   final VoidCallback onMechanicalAssistance;
+  final VoidCallback onFuelRegistration;
 
   const _EmergencyActionsCard({
     required this.onSosCompleted,
     required this.onMechanicalAssistance,
+    required this.onFuelRegistration,
   });
 
   @override
@@ -1029,7 +1291,146 @@ class _EmergencyActionsCard extends StatelessWidget {
             ),
           ),
         ),
+        const SizedBox(height: 12),
+      SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: onFuelRegistration,
+            icon: const Icon(Icons.local_gas_station),
+            label: const Text('Registrar Combustible'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xff2563eb),
+              side: const BorderSide(
+                color: Color(0xff2563eb),
+                width: 1.4,
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 15),
+              textStyle: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
       ],
+    );
+  }
+}
+
+
+class _DriverSideMenu extends StatelessWidget {
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+
+  const _DriverSideMenu({
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(22),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Color(0xff1e3a8a),
+                    Color(0xff2563eb),
+                  ],
+                ),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.local_shipping,
+                    color: Colors.white,
+                    size: 42,
+                  ),
+                  SizedBox(height: 12),
+                  Text(
+                    'NANUTECH Driver',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 21,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Panel del Chofer',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ],
+              ),
+            ),
+            _MenuTile(
+              index: 0,
+              selectedIndex: selectedIndex,
+              icon: Icons.dashboard,
+              title: 'Dashboard',
+              onTap: onSelected,
+            ),
+            _MenuTile(
+              index: 1,
+              selectedIndex: selectedIndex,
+              icon: Icons.badge,
+              title: 'Mi Licencia',
+              onTap: onSelected,
+            ),
+            _MenuTile(
+              index: 2,
+              selectedIndex: selectedIndex,
+              icon: Icons.history,
+              title: 'Historial de Jornadas',
+              onTap: onSelected,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MenuTile extends StatelessWidget {
+  final int index;
+  final int selectedIndex;
+  final IconData icon;
+  final String title;
+  final ValueChanged<int> onTap;
+
+  const _MenuTile({
+    required this.index,
+    required this.selectedIndex,
+    required this.icon,
+    required this.title,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = index == selectedIndex;
+
+    return ListTile(
+      selected: selected,
+      selectedTileColor: const Color(0xffeff6ff),
+      leading: Icon(
+        icon,
+        color: selected ? const Color(0xff2563eb) : Colors.grey.shade700,
+      ),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+          color: selected ? const Color(0xff1e3a8a) : Colors.black87,
+        ),
+      ),
+      onTap: () => onTap(index),
     );
   }
 }
@@ -1040,12 +1441,14 @@ class _Header extends StatelessWidget {
   final bool isOnline;
   final bool syncing;
   final VoidCallback onLogout;
+  final VoidCallback onOpenMenu;
 
   const _Header({
     required this.name,
     required this.isOnline,
     required this.syncing,
     required this.onLogout,
+    required this.onOpenMenu,
   });
 
   @override
@@ -1075,6 +1478,10 @@ class _Header extends StatelessWidget {
         children: [
           Row(
             children: [
+              IconButton(
+                onPressed: onOpenMenu,
+                icon: const Icon(Icons.menu, color: Colors.white),
+              ),
               const Icon(
                 Icons.local_shipping,
                 color: Colors.white,
